@@ -4,14 +4,14 @@ import path from "node:path";
 import { createClient } from "@deepgram/sdk";
 import { openai } from "@ai-sdk/openai";
 import { generateObject, embedMany } from "ai";
-import { PostgresStore, PgVector } from "@mastra/pg";
+import { PgVector } from "@mastra/pg";
 import { Pool } from "pg";
 import { createWorkflow, createStep } from "@mastra/core/workflows";
 import { z } from "zod";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "../db/schema";
-import type { Video, NewVideo, Chunk, NewChunk } from "../db/schema";
-import { eq, and, like, or, gte, lte, sql } from "drizzle-orm";
+import type { Video, NewVideo, NewChunk } from "../db/schema";
+import { eq, sql } from "drizzle-orm";
 
 // Schema for extracting structured data from video transcript
 const videoDataSchema = z.object({
@@ -480,135 +480,6 @@ const chunkAndEmbedTranscript = async ({
   }
 };
 
-// Helper functions for querying videos with JSON metadata
-// Examples:
-// - Find videos with "Dan" as speaker: queryVideos({ speakerContains: "Dan" })
-// - Find videos about "React": queryVideos({ topicContains: "React" })
-// - Find videos by exact speaker: queryVideos({ speakers: ["Dan Abramov"] })
-// - Find videos with multiple criteria: queryVideos({ speakerContains: "Dan", topicContains: "React" })
-const queryVideos = async (filters?: {
-  titleContains?: string;
-  summaryContains?: string;
-  speakerContains?: string; // Search for partial speaker names like "Dan"
-  topicContains?: string; // Search for partial topic names
-  tags?: string[];
-  speakers?: string[]; // Exact speaker matches
-  topics?: string[]; // Exact topic matches
-  dateFrom?: string;
-  dateTo?: string;
-}) => {
-  const conditions = [];
-
-  if (filters?.titleContains) {
-    conditions.push(
-      like(sql`metadata->>'title'`, `%${filters.titleContains}%`)
-    );
-  }
-
-  if (filters?.summaryContains) {
-    conditions.push(
-      like(sql`metadata->>'summary'`, `%${filters.summaryContains}%`)
-    );
-  }
-
-  if (filters?.speakerContains) {
-    conditions.push(
-      like(sql`metadata->'speakers'::text`, `%${filters.speakerContains}%`)
-    );
-  }
-
-  if (filters?.topicContains) {
-    conditions.push(
-      like(sql`metadata->'keyTopics'::text`, `%${filters.topicContains}%`)
-    );
-  }
-
-  if (filters?.tags && filters.tags.length > 0) {
-    const tagConditions = filters.tags.map((tag) =>
-      like(sql`metadata->'tags'::text`, `%"${tag.toLowerCase()}"%`)
-    );
-    conditions.push(or(...tagConditions));
-  }
-
-  if (filters?.speakers && filters.speakers.length > 0) {
-    const speakerConditions = filters.speakers.map((speaker) =>
-      like(
-        sql`lower(metadata->'speakers'::text)`,
-        `%"${speaker.toLowerCase()}"%`
-      )
-    );
-    conditions.push(or(...speakerConditions));
-  }
-
-  if (filters?.topics && filters.topics.length > 0) {
-    const topicConditions = filters.topics.map((topic) =>
-      like(
-        sql`lower(metadata->'keyTopics'::text)`,
-        `%"${topic.toLowerCase()}"%`
-      )
-    );
-    conditions.push(or(...topicConditions));
-  }
-
-  if (filters?.dateFrom) {
-    conditions.push(gte(schema.videos.createdAt, new Date(filters.dateFrom)));
-  }
-
-  if (filters?.dateTo) {
-    conditions.push(lte(schema.videos.createdAt, new Date(filters.dateTo)));
-  }
-
-  const result = await db
-    .select()
-    .from(schema.videos)
-    .where(and(...conditions))
-    .orderBy(schema.videos.createdAt);
-
-  return (
-    result?.map((row) => {
-      const metadata = (row.metadata as any) || {}; // JSONB is already parsed
-      return {
-        id: row.id,
-        fullTranscript: row.fullTranscript,
-        metadata,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-        // Extract commonly used fields for convenience
-        title: metadata.title,
-        summary: metadata.summary,
-        speakers: metadata.speakers || [],
-        keyTopics: metadata.keyTopics || [],
-        actionItems: metadata.actionItems || [],
-        tags: metadata.tags || [],
-        duration: metadata.duration,
-      };
-    }) || []
-  );
-};
-
-const queryChunks = async (videoId: string, searchTerm?: string) => {
-  const conditions = [eq(schema.chunks.videoId, videoId)];
-
-  if (searchTerm) {
-    conditions.push(like(sql`data->>'content'`, `%${searchTerm}%`));
-  }
-
-  const result = await db
-    .select()
-    .from(schema.chunks)
-    .where(and(...conditions))
-    .orderBy(sql`(data->>'chunkIndex')::int`);
-
-  return (
-    result?.map((row) => ({
-      id: row.id,
-      videoId: row.videoId,
-      ...(row.data as any),
-      createdAt: row.createdAt,
-    })) || []
-  );
-};
-
 const checkVideoStep = createStep({
   id: "check-video",
   description: "Checks if the video has already been processed",
@@ -970,4 +841,4 @@ const transcriptWorkflow = createWorkflow({
 
 transcriptWorkflow.commit();
 
-export { transcriptWorkflow, queryVideos, queryChunks };
+export { transcriptWorkflow };
