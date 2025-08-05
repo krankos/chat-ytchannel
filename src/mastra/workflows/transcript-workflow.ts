@@ -524,22 +524,28 @@ const queryVideos = async (filters?: {
   }
 
   if (filters?.tags && filters.tags.length > 0) {
-    const tagConditions = filters.tags.map(
-      (tag) => sql`metadata->'tags' @> ${JSON.stringify([tag])}`
+    const tagConditions = filters.tags.map((tag) =>
+      like(sql`metadata->'tags'::text`, `%"${tag.toLowerCase()}"%`)
     );
     conditions.push(or(...tagConditions));
   }
 
   if (filters?.speakers && filters.speakers.length > 0) {
-    const speakerConditions = filters.speakers.map(
-      (speaker) => sql`metadata->'speakers' @> ${JSON.stringify([speaker])}`
+    const speakerConditions = filters.speakers.map((speaker) =>
+      like(
+        sql`lower(metadata->'speakers'::text)`,
+        `%"${speaker.toLowerCase()}"%`
+      )
     );
     conditions.push(or(...speakerConditions));
   }
 
   if (filters?.topics && filters.topics.length > 0) {
-    const topicConditions = filters.topics.map(
-      (topic) => sql`metadata->'keyTopics' @> ${JSON.stringify([topic])}`
+    const topicConditions = filters.topics.map((topic) =>
+      like(
+        sql`lower(metadata->'keyTopics'::text)`,
+        `%"${topic.toLowerCase()}"%`
+      )
     );
     conditions.push(or(...topicConditions));
   }

@@ -3,24 +3,35 @@ import { Agent } from "@mastra/core/agent";
 import { Memory } from "@mastra/memory";
 import { LibSQLStore } from "@mastra/libsql";
 import { videoSearchTool } from "../tools/retrieval-tool";
+import { MCPClient } from "@mastra/mcp";
+
+const mcp = new MCPClient({
+  servers: {
+    youtubeMcp: {
+      url: new URL(
+        `https://server.smithery.ai/@xianxx17/my-youtube-mcp-server/mcp?api_key=${process.env.SMITHERY_API_KEY || ""}&profile=${process.env.SMITHERY_PROFILE || ""}`
+      ),
+    },
+  },
+});
 
 export const youtubeAgent = new Agent({
   name: "Youtube Agent",
   instructions: `
-    You are a helpful assistant that provides accurate info about published youtube videos from Mastra AI.
+    You help users find and analyze YouTube videos using content intelligence and platform data.
     
-    Use the videoSearchTool to help users:
-    - Search for specific content (provide both query and filters)
-    - Browse videos by metadata (provide only filters, no query)
+    Use videoSearchTool to find videos by:
+    - Searching transcript content (provide 'query')
+    - Filtering by speakers, topics, tags, summaries (provide 'filter')
     
-    The tool automatically chooses between semantic search and metadata browsing based on whether a query is provided.
+    The tool returns videoIds. Use these with YouTube MCP tools to get video details, analytics, and engagement metrics.
 
-    This is the structure of a youtube video link: https://www.youtube.com/watch?v=VIDEO_ID
-
-    The video id can be used to make the youtube video link.
+    Youtube video link: https://www.youtube.com/watch?v={videoId}
+    
+    Combine content insights with performance data to give users actionable recommendations.
 `,
   model: openai("gpt-4.1"),
-  tools: { videoSearchTool },
+  tools: { videoSearchTool, ...(await mcp.getTools()) },
   memory: new Memory({
     storage: new LibSQLStore({
       url: "file:../mastra.db", // path is relative to the .mastra/output directory
