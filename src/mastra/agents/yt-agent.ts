@@ -14,6 +14,10 @@ export const youtubeAgent = new Agent({
     - Browse videos by metadata (provide only filters, no query)
     
     The tool automatically chooses between semantic search and metadata browsing based on whether a query is provided.
+
+    This is the structure of a youtube video link: https://www.youtube.com/watch?v=VIDEO_ID
+
+    The video id can be used to make the youtube video link.
 `,
   model: openai("gpt-4.1"),
   tools: { videoSearchTool },
