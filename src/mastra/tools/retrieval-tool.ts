@@ -6,7 +6,7 @@ import { embed } from "ai";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "../db/schema";
-import { and, like, or, sql } from "drizzle-orm";
+import { and, like, or, sql, inArray } from "drizzle-orm";
 
 const connectionString =
   process.env.DATABASE_URL ||
@@ -153,7 +153,7 @@ const enrichChunksWithVideoData = async (chunks: unknown[]) => {
   const videos = await db
     .select()
     .from(schema.videos)
-    .where(sql`id = ANY(${videoIds})`);
+    .where(inArray(schema.videos.id, videoIds));
 
   const videoMap = new Map(videos.map((v) => [v.id, v]));
 

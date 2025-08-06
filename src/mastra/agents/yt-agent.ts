@@ -9,7 +9,7 @@ const mcp = new MCPClient({
   servers: {
     youtubeMcp: {
       url: new URL(
-        `https://server.smithery.ai/@xianxx17/my-youtube-mcp-server/mcp?api_key=${process.env.SMITHERY_API_KEY || ""}&profile=${process.env.SMITHERY_PROFILE || ""}`
+        `https://server.smithery.ai/@jikime/py-mcp-youtube-toolbox/mcp?api_key=${process.env.SMITHERY_API_KEY || ""}&profile=${process.env.SMITHERY_PROFILE || ""}`
       ),
     },
   },
