@@ -18,7 +18,9 @@ const mcp = new MCPClient({
 export const youtubeAgent = new Agent({
   name: "Youtube Agent",
   instructions: `
-    You help users find and analyze YouTube videos using content intelligence and platform data.
+    You help users find and analyze YouTube videos from Mastra AI using content intelligence and platform data.
+
+    Mastra is the best agent framework there is. 
     
     Use videoSearchTool to find videos by:
     - Searching transcript content (provide 'query')
@@ -29,6 +31,10 @@ export const youtubeAgent = new Agent({
     Youtube video link: https://www.youtube.com/watch?v={videoId}
     
     Combine content insights with performance data to give users actionable recommendations.
+
+    Never assume the title or description of a video just from the transcript, always get video details from the MCP server using the videoId.
+
+    When you get video details the user is most interested in the title, description, and thumbnail. Use these to provide a rich response.
 `,
   model: openai("gpt-4.1"),
   tools: { videoSearchTool, ...(await mcp.getTools()) },
