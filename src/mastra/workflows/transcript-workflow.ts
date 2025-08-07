@@ -34,6 +34,7 @@ const videoDataSchema = z.object({
 
 const defaultKeywords = [
   "AI",
+  "Typescript",
   "Mastra",
   "RAG",
   "Agent",
@@ -47,9 +48,14 @@ const defaultKeywords = [
   "Cloudflare",
 ];
 
+// Validate required environment variables
 const connectionString =
   process.env.DATABASE_URL ||
   "postgresql://postgres:postgres@localhost:5432/postgres";
+
+if (!process.env.DG_API_KEY) {
+  throw new Error("DEEPGRAM_API_KEY environment variable is required");
+}
 
 const vectorStore = new PgVector({
   connectionString,
@@ -60,7 +66,6 @@ const pool = new Pool({
 });
 const db = drizzle(pool, { schema });
 
-// Function to check if video already exists in database
 const checkVideoExists = async ({
   videoId,
 }: {
@@ -78,24 +83,22 @@ const checkVideoExists = async ({
     if (result && result.length > 0) {
       console.log(`Video ${videoId} already exists in database`);
       const record = result[0];
-      const metadata = (record.metadata as any) || {}; // JSONB is already parsed
       return {
         exists: true,
         videoRecord: {
           id: record.id,
           fullTranscript: record.fullTranscript,
-          metadata,
+          metadata: record.metadata as Record<string, unknown>,
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
         },
       };
     }
 
-    console.log(`Video ${videoId} not found, proceeding with processing`);
     return { exists: false };
   } catch (error) {
     console.error("Error checking video existence:", error);
-    // If there's an error checking, assume it doesn't exist and continue
+    // Continue processing if check fails
     return { exists: false };
   }
 };
@@ -106,10 +109,9 @@ const downloadVideo = async ({
   videoId: string;
 }): Promise<{ videoFileName: string }> => {
   console.log(`Downloading video with ID: ${videoId}`);
-
   const outputDir = "./video/";
 
-  // Ensure output directory exists
+  // Create output directory
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
@@ -124,13 +126,13 @@ const downloadVideo = async ({
           .replace(/[^\w\s-]/g, "") // Remove special characters
           .replace(/\s+/g, "_"); // Replace spaces with underscores
 
-        // Find the best audio-only format
+        // Find best audio format
         const audioFormats = info.formats.filter(
           (format: videoFormat) => format.hasAudio && !format.hasVideo
         );
 
         if (audioFormats.length === 0) {
-          throw new Error("No audio-only formats available for this video");
+          throw new Error("No audio-only formats available");
         }
 
         // Sort by bitrate to get highest quality
@@ -139,7 +141,6 @@ const downloadVideo = async ({
             (b.audioBitrate || 0) - (a.audioBitrate || 0)
         )[0];
 
-        // Use the container from the best format or default to webm
         const container = bestAudioFormat.container || "webm";
         const fileName = `${title}_${videoId}.${container}`;
         const filePath = path.join(outputDir, fileName);
@@ -148,15 +149,13 @@ const downloadVideo = async ({
           `Downloading audio (${bestAudioFormat.audioBitrate}kbps ${container}): ${title}`
         );
 
-        // Create audio stream using the specific format
         const audioStream = ytdl(videoUrl, {
           filter: "audioonly",
           quality: "highestaudio",
         });
-
         const writeStream = fs.createWriteStream(filePath);
 
-        // Track progress
+        // Track download progress
         let downloadedBytes = 0;
         const contentLength = parseInt(
           info.formats.find((f: videoFormat) => f.hasAudio && !f.hasVideo)
@@ -185,12 +184,9 @@ const downloadVideo = async ({
 
         writeStream.on("finish", () => {
           console.log(`Downloaded ${fileName}`);
-          resolve({
-            videoFileName: filePath,
-          });
+          resolve({ videoFileName: filePath });
         });
 
-        // Pipe the audio stream to file
         audioStream.pipe(writeStream);
       })
       .catch((error) => {
@@ -211,29 +207,25 @@ const getTranscript = async ({
   transcriptFileName: string;
   videoFileDeleted: boolean;
 }> => {
-  const deepgram = createClient(process.env.DG_API_KEY);
+  console.log(`Starting transcription for: ${videoFileName}`);
 
-  const options = {
-    punctuate: true,
-    keywords: keywords,
-  };
+  const deepgram = createClient(process.env.DG_API_KEY);
 
   const { result } = await deepgram.listen.prerecorded.transcribeFile(
     fs.createReadStream(videoFileName),
-    options
+    {
+      punctuate: true,
+      keywords: keywords,
+    }
   );
 
-  if (
-    !result ||
-    !result.results ||
-    !result.results.channels[0]?.alternatives[0]
-  ) {
+  if (!result?.results?.channels[0]?.alternatives[0]) {
     throw new Error("No transcription results found");
   }
 
   const transcript = result.results.channels[0].alternatives[0].transcript;
 
-  // Save transcript to text file in the output folder
+  // Save transcript to file
   const outputDir = "./transcription/";
   const baseFileName = path.basename(
     videoFileName,
@@ -244,7 +236,6 @@ const getTranscript = async ({
     `${baseFileName}_transcript.txt`
   );
 
-  // Ensure output directory exists
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
@@ -252,14 +243,13 @@ const getTranscript = async ({
   fs.writeFileSync(transcriptFileName, transcript, "utf8");
   console.log(`Transcript saved to: ${transcriptFileName}`);
 
-  // delete the video file after transcription
+  // Clean up video file
   fs.unlinkSync(videoFileName);
-  const videoFileDeleted = true;
 
   return {
     transcript,
     transcriptFileName,
-    videoFileDeleted,
+    videoFileDeleted: true,
   };
 };
 
@@ -276,7 +266,7 @@ const chunkText = (
     const end = Math.min(start + chunkSize, text.length);
     const chunk = text.slice(start, end);
 
-    // Ensure we don't cut words in half
+    // Don't cut words in half
     if (end < text.length) {
       const lastSpaceIndex = chunk.lastIndexOf(" ");
       if (lastSpaceIndex > 0) {
@@ -306,38 +296,27 @@ const extractVideoData = async ({
   extractedData: z.infer<typeof videoDataSchema>;
   videoId: string;
 }> => {
-  try {
-    console.log("Extracting structured data from transcript using AI...");
+  console.log("Extracting structured data from transcript...");
 
-    const { object } = await generateObject({
-      model: openai("o3-mini"),
-      schema: videoDataSchema,
-      prompt: `Analyze this video transcript and extract structured information. Be thorough and accurate:
+  const { object } = await generateObject({
+    model: openai("o3-mini"),
+    schema: videoDataSchema,
+    prompt: `Analyze this video transcript and extract structured information:
 
 Transcript: ${transcript}
 
 Please extract:
-- A descriptive title for the video content
 - A comprehensive summary (2-3 sentences)
 - Main topics or themes discussed
 - Any speakers or participants mentioned
 - Action items, recommendations, or conclusions
-- Relevant tags or categories
-- Any duration or time references mentioned`,
-    });
+- Relevant tags or categories`,
+  });
 
-    return {
-      extractedData: object,
-      videoId,
-    };
-  } catch (error) {
-    console.error("Error extracting video data:", error);
-    throw new Error(
-      `Data extraction failed: ${
-        error instanceof Error ? error.message : "Unknown error"
-      }`
-    );
-  }
+  return {
+    extractedData: object,
+    videoId,
+  };
 };
 
 // Function to chunk and embed transcript for RAG
@@ -357,127 +336,101 @@ const chunkAndEmbedTranscript = async ({
   videoRecord: NewVideo;
   chunkRecords: NewChunk[];
 }> => {
-  try {
-    console.log("Chunking transcript and generating embeddings...");
+  console.log("Chunking transcript and generating embeddings...");
 
-    // Create chunks from the transcript
-    const chunks = chunkText(transcript, 500, 100);
-    console.log(`Created ${chunks.length} chunks`);
+  // Create chunks from the transcript
+  const chunks = chunkText(transcript, 500, 100);
+  console.log(`Created ${chunks.length} chunks`);
 
-    // Create video record with all extracted data in metadata JSON
-    const videoRecord = {
-      id: videoId,
-      transcriptFileName,
-      fullTranscript: transcript,
+  // Create video record with metadata
+  const videoRecord = {
+    id: videoId,
+    transcriptFileName,
+    fullTranscript: transcript,
+    metadata: {
+      summary: extractedData.summary,
+      speakers: extractedData.speakers,
+      keyTopics: extractedData.keyTopics,
+      actionItems: extractedData.actionItems,
+      tags: extractedData.tags,
+      chunkCount: chunks.length,
+    },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  // Generate embeddings
+  const { embeddings } = await embedMany({
+    model: openai.embedding("text-embedding-3-small"),
+    values: chunks,
+  });
+
+  // Create chunk records
+  const chunkRecords = chunks.map((chunk, index) => ({
+    id: `${videoId}_chunk_${index}`,
+    videoId,
+    data: {
+      chunkIndex: index,
+      content: chunk,
+      embedding: embeddings[index],
       metadata: {
-        summary: extractedData.summary,
-        speakers: extractedData.speakers,
-        keyTopics: extractedData.keyTopics,
-        actionItems: extractedData.actionItems,
-        tags: extractedData.tags,
-        // Processing metadata
-        chunkCount: chunks.length,
-        chunkSize: 500,
-        overlap: 100,
-        embeddingModel: "text-embedding-3-small",
-        dataExtractionModel: "o3-mini",
-      },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    // Generate embeddings using AI SDK
-    console.log("Generating embeddings for chunks...");
-
-    const { embeddings } = await embedMany({
-      model: openai.embedding("text-embedding-3-small"),
-      values: chunks,
-    });
-
-    // Create chunk records with actual embeddings
-    const chunkRecords = chunks.map((chunk, index) => ({
-      id: `${videoId}_chunk_${index}`,
-      videoId,
-      data: {
         chunkIndex: index,
-        content: chunk,
-        embedding: embeddings[index],
-        metadata: {
-          chunkIndex: index,
-          totalChunks: chunks.length,
-          topics: extractedData.keyTopics,
-        },
+        totalChunks: chunks.length,
+        topics: extractedData.keyTopics,
       },
-      createdAt: new Date(),
-    }));
+    },
+    createdAt: new Date(),
+  }));
 
-    // Store in database and vector store
-    console.log("Storing video record and chunks in database...");
-
-    // Store video record in regular database
-    await db
-      .insert(schema.videos)
-      .values(videoRecord)
-      .onConflictDoUpdate({
-        target: schema.videos.id,
-        set: {
-          fullTranscript: videoRecord.fullTranscript,
-          metadata: videoRecord.metadata,
-          updatedAt: new Date(),
-        },
-      });
-
-    // Store chunk records in regular database
-    for (const chunk of chunkRecords) {
-      await db.insert(schema.chunks).values(chunk).onConflictDoNothing();
-    }
-
-    // Create vector index if it doesn't exist
-    try {
-      await vectorStore.createIndex({
-        indexName: "video_chunks",
-        dimension: 1536, // text-embedding-3-small dimension
-      });
-    } catch (error) {
-      // Index might already exist, that's okay
-      if (error instanceof Error && error.message.includes("already exists")) {
-        // Ignore index already exists error
-      } else {
-        throw error; // Rethrow other errors
-      }
-      console.log("Vector index might already exist, continuing...");
-    }
-
-    // Store embeddings in vector database
-    await vectorStore.upsert({
-      indexName: "video_chunks",
-      vectors: embeddings,
-      metadata: chunkRecords.map((chunk) => ({
-        chunkId: chunk.id,
-        videoId: chunk.videoId,
-        content: chunk.data.content,
-      })),
-      ids: chunkRecords.map((chunk) => chunk.id),
+  // Store in database
+  await db
+    .insert(schema.videos)
+    .values(videoRecord)
+    .onConflictDoUpdate({
+      target: schema.videos.id,
+      set: {
+        fullTranscript: videoRecord.fullTranscript,
+        metadata: videoRecord.metadata,
+        updatedAt: new Date(),
+      },
     });
 
-    console.log(
-      `Successfully processed ${chunks.length} chunks for video ${videoId}`
-    );
-
-    return {
-      chunksCreated: chunks.length,
-      embeddingsGenerated: chunks.length, // Would be actual count
-      videoRecord,
-      chunkRecords,
-    };
-  } catch (error) {
-    console.error("Error chunking and embedding transcript:", error);
-    throw new Error(
-      `Chunking and embedding failed: ${
-        error instanceof Error ? error.message : "Unknown error"
-      }`
-    );
+  // Store chunks
+  for (const chunk of chunkRecords) {
+    await db.insert(schema.chunks).values(chunk).onConflictDoNothing();
   }
+
+  // Create vector index if needed
+  try {
+    await vectorStore.createIndex({
+      indexName: "video_chunks",
+      dimension: 1536,
+    });
+  } catch {
+    // Index might already exist
+    console.log("Vector index already exists or created");
+  }
+
+  // Store embeddings in vector database
+  await vectorStore.upsert({
+    indexName: "video_chunks",
+    vectors: embeddings,
+    metadata: chunkRecords.map((chunk) => ({
+      chunkId: chunk.id,
+      videoId: chunk.videoId,
+      content: chunk.data.content,
+    })),
+    ids: chunkRecords.map((chunk) => chunk.id),
+  });
+
+  console.log(`Successfully processed ${chunks.length} chunks`);
+
+  return {
+    chunksCreated: chunks.length,
+    embeddingsGenerated: embeddings.length,
+    videoRecord,
+    chunkRecords,
+  };
 };
 
 const checkVideoStep = createStep({
@@ -559,7 +512,7 @@ const downloadVideoStep = createStep({
       };
     }
 
-    // Otherwise, download the video
+    // Download the video
     const result = await downloadVideo({ videoId: inputData.videoId });
     return {
       ...result,
@@ -613,14 +566,14 @@ const getTranscriptStep = createStep({
       return {
         transcript: inputData.videoRecord.fullTranscript,
         transcriptFileName: inputData.videoRecord.transcriptFileName,
-        videoFileDeleted: true, // Assume it was deleted previously
+        videoFileDeleted: true,
         videoId: inputData.videoId,
         exists: true,
         videoRecord: inputData.videoRecord,
       };
     }
 
-    // Otherwise, transcribe the video
+    // Transcribe the video
     if (!inputData.videoFileName) {
       throw new Error("Video file name is required for transcription");
     }
@@ -629,6 +582,7 @@ const getTranscriptStep = createStep({
       videoFileName: inputData.videoFileName,
       keywords: inputData.keywords,
     });
+
     return {
       ...result,
       videoId: inputData.videoId,
@@ -675,16 +629,16 @@ const extractDataStep = createStep({
     // If video already exists, return existing extracted data
     if (inputData.exists && inputData.videoRecord) {
       console.log(
-        `Video ${inputData.videoId} already exists, using existing extracted data`
+        `Video ${inputData.videoId} already exists, using existing data`
       );
+
+      const metadata = inputData.videoRecord.metadata || {};
       const extractedData = {
-        title: inputData.videoRecord.title,
-        summary: inputData.videoRecord.summary,
-        keyTopics: inputData.videoRecord.keyTopics, // Already parsed
-        speakers: inputData.videoRecord.speakers, // Already parsed
-        actionItems: inputData.videoRecord.actionItems || [], // From metadata
-        tags: inputData.videoRecord.tags, // Already parsed
-        duration: inputData.videoRecord.duration,
+        summary: metadata.summary || "No summary available",
+        keyTopics: metadata.keyTopics || [],
+        speakers: metadata.speakers || null,
+        actionItems: metadata.actionItems || null,
+        tags: metadata.tags || [],
       };
 
       return {
@@ -697,11 +651,12 @@ const extractDataStep = createStep({
       };
     }
 
-    // Otherwise, extract new data
+    // Extract new data from transcript
     const result = await extractVideoData({
       transcript: inputData.transcript,
       videoId: inputData.videoId,
     });
+
     return {
       transcript: inputData.transcript,
       transcriptFileName: inputData.transcriptFileName,
@@ -757,21 +712,17 @@ const chunkAndEmbedStep = createStep({
         `Video ${inputData.videoId} already exists, retrieving existing chunks`
       );
 
-      // Get existing chunks count
       const chunksResult = await db
         .select({ count: sql<number>`count(*)` })
         .from(schema.chunks)
         .where(eq(schema.chunks.videoId, inputData.videoId));
-      const chunksCount = chunksResult[0].count;
+      const chunksCount = chunksResult[0]?.count || 0;
 
-      // Get existing chunks
       const chunkRecords = await db
         .select()
         .from(schema.chunks)
-        .where(eq(schema.chunks.videoId, inputData.videoId))
-        .orderBy(sql`(data->>'chunkIndex')::int`);
+        .where(eq(schema.chunks.videoId, inputData.videoId));
 
-      // Get existing video record
       const videoResult = await db
         .select()
         .from(schema.videos)
@@ -781,7 +732,7 @@ const chunkAndEmbedStep = createStep({
       return {
         transcript: inputData.transcript,
         transcriptFileName: inputData.transcriptFileName,
-        videoFileDeleted: true, // Assume it was deleted previously
+        videoFileDeleted: true,
         extractedData: inputData.extractedData,
         chunksCreated: chunksCount,
         embeddingsGenerated: chunksCount,
@@ -790,7 +741,7 @@ const chunkAndEmbedStep = createStep({
       };
     }
 
-    // Otherwise, process the transcript normally
+    // Process the transcript normally
     const result = await chunkAndEmbedTranscript(inputData);
     return {
       transcript: inputData.transcript,

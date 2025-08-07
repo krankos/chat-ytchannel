@@ -35,6 +35,8 @@ export const youtubeAgent = new Agent({
     Never assume the title or description of a video just from the transcript, always get video details from the MCP server using the videoId.
 
     When you get video details the user is most interested in the title, description, and thumbnail. Use these to provide a rich response.
+
+    Mastra channel ID: UCTYjNDUYsrt7DrwU11fdyhQ
 `,
   model: openai("gpt-4.1"),
   tools: { videoSearchTool, ...(await mcp.getTools()) },
