@@ -1,14 +1,14 @@
 # Chat with YouTube Videos 🎬
 
-Want to talk to YouTube videos? This template lets you **chat with the Mastra AI YouTube channel** using AI! Ask questions, get summaries, find topics - just like having a conversation.
+Want to talk to YouTube videos? This template builds a **RAG (Retrieval-Augmented Generation) system** that lets you **chat with the Mastra AI YouTube channel** using AI! Ask questions, get summaries, find topics - just like having a conversation with video transcripts.
 
 > 🎯 **Built for Mastra AI**: This template works with the **Mastra AI YouTube channel**, but you can use it with any YouTube channel!
 
 ## What This Does 🤖
 
-This template creates a chatbot that knows everything about YouTube videos:
+This template creates a **RAG chatbot** that knows everything about YouTube videos:
 
-**🎯 Chat with Videos**: Ask "What did they say about workflows?" and get smart answers from Mastra AI videos.
+**🎯 Chat with Videos**: Ask "What did they say about workflows?" and get smart answers from Mastra AI video transcripts.
 
 **📚 Learn Mastra**: Build something fun while learning Mastra concepts like workflows, agents, and tools.
 
@@ -17,8 +17,9 @@ This template creates a chatbot that knows everything about YouTube videos:
 ### How It Works ✨
 
 1. **Process Videos**: Download and transcribe Mastra AI YouTube videos (or any videos!)
-2. **Extract Knowledge**: AI pulls out speakers, topics, and key insights
-3. **Chat Away**: Ask questions and get answers based on the video content
+2. **Extract & Store**: AI pulls out speakers, topics, and key insights, stores them as searchable chunks
+3. **RAG Chat**: When you ask questions, it retrieves relevant transcript chunks first
+4. **Get YouTube Data**: Uses the video IDs from retrieved chunks to fetch metadata, thumbnails, analytics via MCP
 
 ### Why This is Cool 🚀
 
@@ -68,40 +69,36 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
 OPENAI_API_KEY=your_openai_key_here
 DEEPGRAM_API_KEY=your_deepgram_key_here
 
-# YouTube Access
+# YouTube Access (you'll need YouTube Data API key when setting up Smithery)
 SMITHERY_API_KEY=your_smithery_key_here
 SMITHERY_PROFILE=your_profile_here
 ```
+
+> 💡 **Note**: When setting up your Smithery account, you'll need a **YouTube Data API key** to access YouTube videos and their metadata.
 
 ## How to Use It 🎮
 
 ### 1. Process Some Videos 🍿
 
-First, let's teach the AI about some Mastra videos:
+First, let's teach the RAG system about some Mastra videos:
 
-```bash
-# Start the server
-pnpm dev
-
-# Process a Mastra AI video
-curl -X POST http://localhost:4111/workflows/transcript-workflow/run \
-  -H "Content-Type: application/json" \
-  -d '{
-    "videoId": "dQw4w9WgXcQ",
-    "keywords": ["AI", "Mastra", "workflows"]
-  }'
-```
+1. Start the server: `pnpm dev`
+2. Go to the Mastra playground at `http://localhost:4111/workflows`
+3. Find the **transcript-workflow** and run it
+4. Provide these inputs:
+   - **videoId**: Any YouTube video ID (e.g., "dQw4w9WgXcQ")
+   - **keywords**: Array of relevant terms like ["AI", "Mastra", "workflows"]
 
 This will:
 
 - Download the video's audio
-- Turn speech into text
-- Pull out topics, speakers, and summaries
-- Make it searchable
+- Turn speech into text with Deepgram
+- Extract topics, speakers, and summaries with AI
+- Split into chunks and store with vector embeddings for RAG
 
 ### 2. Start Chatting! 💬
 
-Go to `http://localhost:4111` and try asking:
+Once you've processed some videos, go to `http://localhost:4111/agents/youtubeAgent/chat` and try asking:
 
 **For Mastra AI videos:**
 
@@ -109,26 +106,20 @@ Go to `http://localhost:4111` and try asking:
 - "Find videos about workflows"
 - "Summarize the latest tool tutorial"
 - "Who talks about memory in the videos?"
+- "Show me the most popular video about agents"
 
-The AI combines:
+The RAG system works like this:
 
-- **Video content** from processed transcripts
-- **YouTube data** (titles, descriptions, etc.)
-- **Smart conversation** that remembers what you talked about
+1. **Retrieves transcript chunks** that match your question from the vector database
+2. **Gets video IDs** from those chunks
+3. **Fetches YouTube metadata** (titles, descriptions, thumbnails, view counts) via MCP
+4. **Combines everything** to give you complete answers with context
+
+> 💡 **Note**: You need to process at least one video first using the workflow above, or you won't have any data to chat about!
 
 ### 3. Use Different Channels 🌟
 
-Want to chat with other YouTube channels? Just process their videos:
-
-```bash
-# Process any YouTube video
-curl -X POST http://localhost:4111/workflows/transcript-workflow/run \
-  -H "Content-Type: application/json" \
-  -d '{
-    "videoId": "any-youtube-video-id",
-    "keywords": ["relevant", "terms"]
-  }'
-```
+Want to build RAG on other YouTube channels? Just process their videos using the same workflow in the playground with any YouTube video ID and relevant keywords.
 
 ## What's Inside? 🔧
 
@@ -149,9 +140,9 @@ This template shows you how to use key Mastra features:
 
 ### What Powers It ⚡
 
-- **Database**: PostgreSQL + pgvector for storing video data
+- **Database**: PostgreSQL + pgvector for storing video transcripts and embeddings
 - **AI**: OpenAI for chat + Deepgram for transcription
-- **YouTube**: Access via Smithery.ai MCP servers
+- **YouTube**: Access via Smithery.ai MCP servers (gets metadata, thumbnails, analytics)
 - **Framework**: Mastra with TypeScript
 
 ## Database 🗄️
