@@ -84,7 +84,7 @@ First, let's teach the AI about some Mastra videos:
 pnpm dev
 
 # Process a Mastra AI video
-curl -X POST http://localhost:4000/workflows/transcript-workflow/run \
+curl -X POST http://localhost:4111/workflows/transcript-workflow/run \
   -H "Content-Type: application/json" \
   -d '{
     "videoId": "dQw4w9WgXcQ",
@@ -101,7 +101,7 @@ This will:
 
 ### 2. Start Chatting! 💬
 
-Go to `http://localhost:4000` and try asking:
+Go to `http://localhost:4111` and try asking:
 
 **For Mastra AI videos:**
 
@@ -122,7 +122,7 @@ Want to chat with other YouTube channels? Just process their videos:
 
 ```bash
 # Process any YouTube video
-curl -X POST http://localhost:4000/workflows/transcript-workflow/run \
+curl -X POST http://localhost:4111/workflows/transcript-workflow/run \
   -H "Content-Type: application/json" \
   -d '{
     "videoId": "any-youtube-video-id",
